@@ -4,6 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "cronSchedule": "*/15 * * * *"
+    "cronSchedule": "*/15 * * * *",
+    "startCommand": "python trigger.py"
   }
 }
