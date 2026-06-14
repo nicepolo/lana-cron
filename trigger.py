@@ -122,10 +122,10 @@ try:
         funding   = c.get("funding_rate", 0)
         bb_pos    = c.get("bb_position", "")
 
-        if score >= MIN_SCORE and ma_bull and rsi and rsi < 75:
+        if score >= MIN_SCORE:
             direction = "LONG"
         else:
-            print(f"  {coin}: score={score} ma_bull={ma_bull} rsi={rsi} SKIP")
+            print(f"  {coin}: score={score} < {MIN_SCORE} SKIP")
             continue
 
         print(f"  PUSH {coin}: LONG {score}pts")
