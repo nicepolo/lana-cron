@@ -14,7 +14,7 @@ SCAN_URL     = os.getenv("SCAN_URL", "https://web-production-7cdf9.up.railway.ap
 ANALYSIS_URL = os.getenv("ANALYSIS_URL", "https://web-production-7cdf9.up.railway.app/api/analyze")
 BOT_TOKEN    = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID      = os.getenv("TELEGRAM_CHAT_ID", "")
-MIN_SCORE    = int(os.getenv("MIN_SCORE", "76"))
+MIN_SCORE    = int(os.getenv("MIN_SCORE", "65"))
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
