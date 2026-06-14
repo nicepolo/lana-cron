@@ -68,7 +68,7 @@ def get_analysis(coin):
     return None
 
 def format_signal(analysis, coin, change, price):
-    score     = analysis.get("score", 0)
+    score     = analysis.get("lana_score") or analysis.get("score") or 0
     direction = analysis.get("direction", "WATCH")
     entry     = analysis.get("entry_zone", "")
     sl        = analysis.get("stop_loss", "")
@@ -77,8 +77,8 @@ def format_signal(analysis, coin, change, price):
     timeframe = analysis.get("timeframe", "4-8小時")
     risk_note = analysis.get("risk_note", "嚴控倉位，設好止損")
     reason    = analysis.get("reason", "")
-    rsi       = analysis.get("rsi", "")
-    vol_ratio = analysis.get("vol_ratio", "")
+    rsi       = analysis.get("rsi") or analysis.get("rsi_1h", "")
+    vol_ratio = analysis.get("vol_ratio") or analysis.get("vol_ratio_1h", "")
     funding   = analysis.get("funding_rate", "")
 
     dir_emoji  = {"LONG": "🟢", "SHORT": "🔴"}.get(direction, "⚪")
@@ -137,7 +137,7 @@ try:
             continue
 
         direction = analysis.get("direction", "WATCH")
-        score     = analysis.get("score", 0)
+        score     = analysis.get("lana_score") or analysis.get("score") or 0
 
         # 只推 LONG/SHORT 且分數達標
         raw_keys = list(analysis.keys()) if analysis else []
