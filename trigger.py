@@ -1,8 +1,10 @@
 """
-trigger.py - LANA Cron 觸發器
-修復：
-1. 用 Telegram getUpdates 去重（跨 container 有效）
-2. analyze 分數也必須 >= MIN_SCORE 才推送
+trigger.py - LANA Cron 觸發器 v3
+核心邏輯：用 /api/analyze 結果決定推送，確保 TG 與網頁一致
+1. /api/scan 只取幣種列表
+2. 每顆幣跑 /api/analyze
+3. analyze 說 LONG/SHORT 且分數 >= MIN_SCORE → 推送
+4. analyze 說 WATCH → 跳過
 """
 
 import requests, os, sys, time, hashlib
@@ -31,29 +33,8 @@ def send_tg(text):
         print(f"TG 錯誤: {e}")
         return False
 
-def already_sent_today(coin):
-    """查 TG 最近 50 條訊息，今天有推過這顆幣就跳過"""
-    try:
-        r = requests.get(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates",
-            params={"limit": 50, "offset": -50},
-            timeout=8
-        )
-        if not r.ok:
-            return False
-        updates = r.json().get("result", [])
-        today = datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d")
-        for u in updates:
-            msg = u.get("message", {}) or u.get("channel_post", {})
-            text = msg.get("text", "")
-            if coin in text and today in text:
-                return True
-        return False
-    except:
-        return False
-
 def tg_recent_fingerprints():
-    """取得 TG 最近訊息的指紋集合（用於去重）"""
+    """取得 TG 最近 10 分鐘訊息指紋，跨 container 去重"""
     try:
         r = requests.get(
             f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates",
@@ -69,14 +50,25 @@ def tg_recent_fingerprints():
             msg = u.get("message", {}) or u.get("channel_post", {})
             msg_ts = msg.get("date", 0)
             text = msg.get("text", "")
-            # 只看 10 分鐘內的訊息
             if now_ts - msg_ts < 600 and text:
                 fps.add(hashlib.md5(text[:80].encode()).hexdigest()[:8])
         return fps
     except:
         return set()
 
-def format_signal(analysis, coin, score, change, price):
+def get_analysis(coin):
+    try:
+        r = requests.get(f"{ANALYSIS_URL}/{coin}", timeout=45)
+        if r.ok:
+            data = r.json()
+            if data.get("ok"):
+                return data.get("data") or data.get("analysis")
+    except Exception as e:
+        print(f"  analyze 失敗 {coin}: {e}")
+    return None
+
+def format_signal(analysis, coin, change, price):
+    score     = analysis.get("score", 0)
     direction = analysis.get("direction", "WATCH")
     entry     = analysis.get("entry_zone", "")
     sl        = analysis.get("stop_loss", "")
@@ -89,10 +81,10 @@ def format_signal(analysis, coin, score, change, price):
     vol_ratio = analysis.get("vol_ratio", "")
     funding   = analysis.get("funding_rate", "")
 
-    dir_emoji = {"LONG": "🟢", "SHORT": "🔴", "WATCH": "⚪"}.get(direction, "⚪")
-    dir_text  = {"LONG": "做多 ▲", "SHORT": "做空 ▼", "WATCH": "觀望"}.get(direction, "觀望")
+    dir_emoji  = {"LONG": "🟢", "SHORT": "🔴"}.get(direction, "⚪")
+    dir_text   = {"LONG": "做多 ▲", "SHORT": "做空 ▼"}.get(direction, "觀望")
     conf_label = "高 🔥" if score >= 80 else "中 ✅" if score >= 65 else "低 ⚠️"
-    now_str = datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d %H:%M")
+    now_str    = datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d %H:%M")
 
     msg = f"""{dir_emoji} <b>{coin}/USDT (OKX)</b>
 現價: {price}  📈 24h {change:+.1f}%
@@ -102,7 +94,7 @@ RSI 1H: {rsi or 'N/A'}  量能: {f'{vol_ratio:.1f}x' if vol_ratio else 'N/A'}  F
     if reason:
         msg += f"\n\n📌 {reason}"
 
-    if direction in ("LONG", "SHORT") and entry:
+    if entry:
         msg += f"""
 
 🎯 入場區間: {entry}
@@ -114,17 +106,6 @@ RSI 1H: {rsi or 'N/A'}  量能: {f'{vol_ratio:.1f}x' if vol_ratio else 'N/A'}  F
 
     msg += f"\n\n⏰ {now_str}"
     return msg
-
-def get_analysis(coin):
-    try:
-        r = requests.get(f"{ANALYSIS_URL}/{coin}", timeout=45)
-        if r.ok:
-            data = r.json()
-            if data.get("ok"):
-                return data.get("data") or data.get("analysis")
-    except Exception as e:
-        print(f"  analysis 失敗 {coin}: {e}")
-    return None
 
 # ── 主流程 ──────────────────────────────────────────────────
 try:
@@ -140,53 +121,48 @@ try:
     ts    = data.get("ts", "")
     print(f"  取得 {len(coins)} 顆幣")
 
-    # scan 分數 >= MIN_SCORE 的候選
-    candidates = [c for c in coins if (c.get("lana_score") or 0) >= MIN_SCORE]
-    print(f"  scan 達標 (>={MIN_SCORE}分): {len(candidates)} 顆")
-
-    # 取得近期 TG 指紋（10分鐘內），用於去重
+    # 取近期 TG 指紋去重
     recent_fps = tg_recent_fingerprints()
 
-    pushed = 0
-    for c in candidates:
+    pushed   = 0
+    skipped  = 0
+
+    for c in coins:
         coin   = c["coin"]
-        score  = c.get("lana_score", 0)
         change = c.get("change", 0)
         price  = c.get("price", 0)
 
-        print(f"  分析 {coin} (scan:{score}分)...")
         analysis = get_analysis(coin)
-
         if not analysis:
-            print(f"  {coin} 分析失敗，跳過")
-            continue
-
-        # analyze 分數也要 >= MIN_SCORE
-        analyze_score = analysis.get("score", score)
-        if analyze_score < MIN_SCORE:
-            print(f"  {coin} analyze分數 {analyze_score} < {MIN_SCORE}，跳過")
             continue
 
         direction = analysis.get("direction", "WATCH")
+        score     = analysis.get("score", 0)
+
+        # 只推 LONG/SHORT 且分數達標
         if direction == "WATCH":
-            print(f"  {coin} 方向 WATCH，跳過")
+            skipped += 1
+            continue
+        if score < MIN_SCORE:
+            print(f"  {coin} {direction} {score}分 < {MIN_SCORE}，跳過")
+            skipped += 1
             continue
 
-        msg = format_signal(analysis, coin, analyze_score, change, price)
+        msg = format_signal(analysis, coin, change, price)
 
-        # 指紋去重（10分鐘內相同訊號不重發）
+        # 指紋去重
         fp = hashlib.md5(msg[:80].encode()).hexdigest()[:8]
         if fp in recent_fps:
             print(f"  {coin} 10分鐘內已推送，跳過")
             continue
 
+        print(f"  ✅ 推送 {coin} {direction} {score}分")
         send_tg(msg)
         recent_fps.add(fp)
         pushed += 1
-        print(f"  ✅ {coin} 推送完成")
         time.sleep(1.5)
 
-    # 掃描彙報
+    # 掃描彙報（前5名用 scan 分數排序）
     top5 = sorted(coins, key=lambda x: x.get("lana_score") or 0, reverse=True)[:5]
     summary = "🔍 LANA 掃描結果:\n\n"
     for c in top5:
@@ -196,7 +172,7 @@ try:
     summary += f"\n⏰ {ts}  |  推送訊號: {pushed} 個"
     send_tg(summary)
 
-    print(f"完成，推送 {pushed} 個訊號")
+    print(f"完成，推送 {pushed} 個，跳過 {skipped} 個")
 
 except Exception as e:
     print(f"錯誤: {e}")
