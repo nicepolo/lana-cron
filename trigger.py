@@ -140,6 +140,7 @@ try:
         score     = analysis.get("score", 0)
 
         # 只推 LONG/SHORT 且分數達標
+        print(f"  {coin}: direction={direction} score={score}")
         if direction == "WATCH":
             skipped += 1
             continue
