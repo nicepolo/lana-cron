@@ -19,7 +19,7 @@ MIN_SCORE    = int(os.getenv("MIN_SCORE", "50"))
 COOLDOWN_HRS = 4
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
-COOLDOWN_FILE = "/tmp/lana_cooldown.json"
+COOLDOWN_FILE = "/tmp/lana_cooldown_v2.json"
 
 def load_cooldown():
     try:
@@ -189,9 +189,7 @@ try:
         print(f"  {coin} AI結果: {direction} {ai_score}分")
 
         if direction != "LONG":
-            print(f"  {coin} AI說{direction}，跳過")
-            # WATCH 只冷卻 1 小時（避免短時間重複分析，但保留後續機會）
-            cooldown[coin] = now_ts - (COOLDOWN_HRS - 1) * 3600
+            print(f"  {coin} AI說{direction}，跳過（不設冷卻）")
             continue
 
         msg = format_signal(coin, ai_result, score, change, price)
