@@ -181,7 +181,7 @@ try:
         ai_result = ai_analyze(coin, price, change)
 
         if not ai_result:
-            print(f"  {coin} AI 分析失敗，跳過")
+            print(f"  {coin} AI 分析失敗，跳過（不設冷卻，下輪重試）")
             continue
 
         direction = ai_result.get("direction", "WATCH")
@@ -190,7 +190,8 @@ try:
 
         if direction != "LONG":
             print(f"  {coin} AI說{direction}，跳過")
-            cooldown[coin] = now_ts  # 也冷卻，避免重複分析
+            # WATCH 只冷卻 1 小時（避免短時間重複分析，但保留後續機會）
+            cooldown[coin] = now_ts - (COOLDOWN_HRS - 1) * 3600
             continue
 
         msg = format_signal(coin, ai_result, score, change, price)
