@@ -78,8 +78,14 @@ def ai_analyze(coin, price, change_24h):
         )
         if r.ok:
             data = r.json()
-            if data.get("ok"):
-                return data.get("result") or data.get("data") or data
+            # ai_analyze 直接回傳 {direction, score, ...}，沒有 ok 包裝
+            if data.get("error"):
+                print(f"  AI 回傳錯誤 {coin}: {data.get('error')}")
+                return None
+            if data.get("direction"):
+                return data
+        else:
+            print(f"  AI HTTP {r.status_code} {coin}")
     except Exception as e:
         print(f"  AI 分析失敗 {coin}: {e}")
     return None
