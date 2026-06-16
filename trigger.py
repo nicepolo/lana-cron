@@ -170,12 +170,7 @@ try:
         change = c.get("change", 0)
         price  = c.get("price", 0)
 
-        # 冷卻檢查（4小時）
-        last = cooldown.get(coin, 0)
-        if now_ts - last < COOLDOWN_HRS * 3600:
-            remaining = int((COOLDOWN_HRS * 3600 - (now_ts - last)) / 60)
-            print(f"  {coin} 冷卻中（剩 {remaining} 分鐘），跳過")
-            continue
+        # 冷卻檢查已停用（改用 TG 指紋去重，見下方）
 
         print(f"  AI 分析 {coin} (scan:{score}分)...")
         ai_result = ai_analyze(coin, price, change)
@@ -202,7 +197,6 @@ try:
 
         send_tg(msg)
         recent_fps.add(fp)
-        cooldown[coin] = now_ts
         pushed += 1
         print(f"  ✅ {coin} 推送完成")
         time.sleep(1.5)
