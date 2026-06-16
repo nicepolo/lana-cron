@@ -90,7 +90,7 @@ def ai_analyze(coin, price, change_24h):
         print(f"  AI 分析失敗 {coin}: {e}")
     return None
 
-def format_signal(coin, ai_result, scan_score, change, price):
+def format_signal(coin, ai_result, scan_score, change, price, scan_coin=None):
     direction = ai_result.get("direction", "WATCH")
     score     = ai_result.get("score", scan_score)
     entry     = ai_result.get("entry_zone", "")
@@ -101,9 +101,10 @@ def format_signal(coin, ai_result, scan_score, change, price):
     risk_note = ai_result.get("risk_note", "嚴控倉位，設好止損，單筆不超 3-5%")
     summary   = ai_result.get("summary", "")
     reason    = ai_result.get("reason", "")
-    rsi       = ai_result.get("rsi_1h") or ai_result.get("rsi", "")
-    vol_ratio = ai_result.get("vol_ratio", "")
-    funding   = ai_result.get("funding_rate", "")
+    sc        = scan_coin or {}
+    rsi       = ai_result.get("rsi_1h") or ai_result.get("rsi") or sc.get("rsi") or ""
+    vol_ratio = ai_result.get("vol_ratio") or sc.get("vol_ratio") or ""
+    funding   = ai_result.get("funding_rate") or sc.get("funding") or ""
 
     dir_emoji  = {"LONG": "🟢", "SHORT": "🔴"}.get(direction, "⚪")
     dir_text   = {"LONG": "做多 ▲", "SHORT": "做空 ▼"}.get(direction, "觀望")
@@ -187,7 +188,7 @@ try:
             print(f"  {coin} AI說{direction}，跳過（不設冷卻）")
             continue
 
-        msg = format_signal(coin, ai_result, score, change, price)
+        msg = format_signal(coin, ai_result, score, change, price, scan_coin=c)
 
         # 指紋去重
         fp = hashlib.md5(msg[:80].encode()).hexdigest()[:8]
