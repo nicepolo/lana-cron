@@ -29,6 +29,8 @@ def send_tg(text):
             json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"},
             timeout=10
         )
+        if not r.ok:
+            print(f"TG 推送失敗 HTTP {r.status_code}: {r.text[:200]}")
         return r.ok
     except Exception as e:
         print(f"TG 錯誤: {e}")
@@ -192,10 +194,13 @@ try:
             print(f"  {coin} 10分鐘內已推送，跳過")
             continue
 
-        send_tg(msg)
-        recent_fps.add(fp)
-        pushed += 1
-        print(f"  ✅ {coin} 推送完成")
+        ok = send_tg(msg)
+        if ok:
+            recent_fps.add(fp)
+            pushed += 1
+            print(f"  ✅ {coin} 推送完成")
+        else:
+            print(f"  ❌ {coin} 推送失敗（未列入計數，指紋也不記錄，避免之後被誤判已送過）")
         time.sleep(1.5)
 
     if skipped_n > 0:
