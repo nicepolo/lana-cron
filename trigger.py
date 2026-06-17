@@ -1,14 +1,14 @@
 """
-trigger.py - LANA Cron v6
+trigger.py - LANA Cron v7
 流程：
 1. /api/scan 取所有幣分數
 2. 分數 >= 65 的幣 → 呼叫 /api/ai_analyze 深度分析
 3. AI 說 LONG 或 SHORT → 推送 TG
 4. AI 說 WATCH → 靜默跳過
-5. 同一顆幣 4 小時冷卻（不重複 AI 分析）
+5. 同一顆幣 4 小時冷卻（由 app.py 伺服器端記憶體處理，cron 端本身無狀態）
 """
 
-import requests, os, sys, time, hashlib, json
+import requests, os, sys, time, hashlib
 from datetime import datetime, timezone, timedelta
 
 SCAN_URL     = os.getenv("SCAN_URL", "https://web-production-7cdf9.up.railway.app/api/scan")
@@ -16,22 +16,8 @@ AI_URL       = os.getenv("AI_URL", "https://web-production-7cdf9.up.railway.app/
 BOT_TOKEN    = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID      = os.getenv("TELEGRAM_CHAT_ID", "")
 MIN_SCORE    = int(os.getenv("MIN_SCORE", "72"))
-COOLDOWN_HRS = 4
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
-COOLDOWN_FILE = "/tmp/lana_cooldown_v2.json"
-
-def load_cooldown():
-    try:
-        return json.loads(open(COOLDOWN_FILE).read())
-    except:
-        return {}
-
-def save_cooldown(data):
-    try:
-        open(COOLDOWN_FILE, "w").write(json.dumps(data))
-    except:
-        pass
 
 def send_tg(text):
     if not BOT_TOKEN or not CHAT_ID:
@@ -157,10 +143,6 @@ try:
     candidates = [c for c in coins if (c.get("lana_score") or 0) >= MIN_SCORE]
     print(f"  候選 (>={MIN_SCORE}分): {len(candidates)} 顆")
 
-    # 載入冷卻記錄
-    cooldown = load_cooldown()
-    now_ts   = time.time()
-
     # TG 指紋去重
     recent_fps = tg_recent_fingerprints()
 
@@ -171,13 +153,13 @@ try:
         change = c.get("change", 0)
         price  = c.get("price", 0)
 
-        # 冷卻檢查已停用（改用 TG 指紋去重，見下方）
+        # 冷卻由 app.py 伺服器端記憶體處理（cron 端每次都是全新容器，本地無法持久記憶冷卻）
 
         print(f"  AI 分析 {coin} (scan:{score}分)...")
         ai_result = ai_analyze(coin, price, change)
 
         if not ai_result:
-            print(f"  {coin} AI 分析失敗，跳過（不設冷卻，下輪重試）")
+            print(f"  {coin} AI 分析失敗，跳過")
             continue
 
         direction = ai_result.get("direction", "WATCH")
@@ -185,7 +167,7 @@ try:
         print(f"  {coin} AI結果: {direction} {ai_score}分")
 
         if direction not in ("LONG", "SHORT"):
-            print(f"  {coin} AI說{direction}，跳過（不設冷卻）")
+            print(f"  {coin} AI說{direction}，跳過")
             continue
 
         msg = format_signal(coin, ai_result, score, change, price, scan_coin=c)
@@ -201,8 +183,6 @@ try:
         pushed += 1
         print(f"  ✅ {coin} 推送完成")
         time.sleep(1.5)
-
-    save_cooldown(cooldown)
 
     # 掃描彙報
     top5 = sorted(coins, key=lambda x: x.get("lana_score") or 0, reverse=True)[:5]
