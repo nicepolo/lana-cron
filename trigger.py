@@ -1,10 +1,10 @@
 """
-trigger.py - LANA Cron v5
+trigger.py - LANA Cron v6
 流程：
 1. /api/scan 取所有幣分數
 2. 分數 >= 65 的幣 → 呼叫 /api/ai_analyze 深度分析
-3. AI 說 LONG → 推送 TG
-4. AI 說 WATCH/SHORT → 靜默跳過
+3. AI 說 LONG 或 SHORT → 推送 TG
+4. AI 說 WATCH → 靜默跳過
 5. 同一顆幣 4 小時冷卻（不重複 AI 分析）
 """
 
@@ -184,7 +184,7 @@ try:
         ai_score  = ai_result.get("score", 0)
         print(f"  {coin} AI結果: {direction} {ai_score}分")
 
-        if direction != "LONG":
+        if direction not in ("LONG", "SHORT"):
             print(f"  {coin} AI說{direction}，跳過（不設冷卻）")
             continue
 
