@@ -1,9 +1,9 @@
 """
-trigger.py - LANA Cron v7
+trigger.py - LANA Cron v8
 流程：
 1. /api/scan 取所有幣分數
-2. 分數 >= 65 的幣 → 呼叫 /api/ai_analyze 深度分析
-3. AI 說 LONG 或 SHORT → 推送 TG
+2. 分數 >= MIN_SCORE 的幣 → 呼叫 /api/ai_analyze 深度分析
+3. AI 說 LONG/SHORT 的訊號依 AI 評分排序，只推最強的前 TOP_N_PUSH 個（避免選擇困難）
 4. AI 說 WATCH → 靜默跳過
 5. 同一顆幣 4 小時冷卻（由 app.py 伺服器端記憶體處理，cron 端本身無狀態）
 """
@@ -16,6 +16,7 @@ AI_URL       = os.getenv("AI_URL", "https://web-production-7cdf9.up.railway.app/
 BOT_TOKEN    = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID      = os.getenv("TELEGRAM_CHAT_ID", "")
 MIN_SCORE    = int(os.getenv("MIN_SCORE", "72"))
+TOP_N_PUSH   = int(os.getenv("TOP_N_PUSH", "3"))
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
@@ -146,7 +147,7 @@ try:
     # TG 指紋去重
     recent_fps = tg_recent_fingerprints()
 
-    pushed = 0
+    qualified = []  # 通過AI分析且判定LONG/SHORT的訊號，先收集起來排序
     for c in candidates:
         coin   = c["coin"]
         score  = c.get("lana_score", 0)
@@ -170,7 +171,20 @@ try:
             print(f"  {coin} AI說{direction}，跳過")
             continue
 
-        msg = format_signal(coin, ai_result, score, change, price, scan_coin=c)
+        qualified.append({
+            "coin": coin, "ai_result": ai_result, "ai_score": ai_score,
+            "score": score, "change": change, "price": price, "scan_coin": c
+        })
+
+    # 依AI評分排序，只推最強的前 TOP_N_PUSH 個，避免一次丟太多訊號造成選擇困難
+    qualified.sort(key=lambda x: x["ai_score"], reverse=True)
+    to_send = qualified[:TOP_N_PUSH]
+    skipped_n = len(qualified) - len(to_send)
+
+    pushed = 0
+    for q in to_send:
+        coin = q["coin"]
+        msg = format_signal(coin, q["ai_result"], q["score"], q["change"], q["price"], scan_coin=q["scan_coin"])
 
         # 指紋去重
         fp = hashlib.md5(msg[:80].encode()).hexdigest()[:8]
@@ -184,6 +198,10 @@ try:
         print(f"  ✅ {coin} 推送完成")
         time.sleep(1.5)
 
+    if skipped_n > 0:
+        skipped_coins = ", ".join(q["coin"] for q in qualified[TOP_N_PUSH:])
+        print(f"  共{len(qualified)}個訊號達標，只推最強{len(to_send)}個，略過{skipped_n}個（{skipped_coins}）")
+
     # 掃描彙報
     top5 = sorted(coins, key=lambda x: x.get("lana_score") or 0, reverse=True)[:5]
     lines = ["🔍 LANA 掃描結果:", ""]
@@ -191,7 +209,7 @@ try:
         sc = c.get("lana_score", "N/A")
         ch = c.get("change", 0)
         lines.append(f"💰 {c['coin']}: {sc} 分 | 漲幅 {ch:+.1f}%")
-    lines.append(f"\n⏰ {ts}  |  AI分析: {len(candidates)} 顆候選  |  推送: {pushed} 個")
+    lines.append(f"\n⏰ {ts}  |  AI分析: {len(candidates)} 顆候選  |  達標: {len(qualified)} 個  |  推送: {pushed} 個")
     send_tg("\n".join(lines))
 
     print(f"完成，推送 {pushed} 個")
