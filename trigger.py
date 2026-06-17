@@ -8,7 +8,7 @@ trigger.py - LANA Cron v8
 5. 同一顆幣 4 小時冷卻（由 app.py 伺服器端記憶體處理，cron 端本身無狀態）
 """
 
-import requests, os, sys, time, hashlib
+import requests, os, sys, time, hashlib, html
 from datetime import datetime, timezone, timedelta
 
 SCAN_URL     = os.getenv("SCAN_URL", "https://web-production-7cdf9.up.railway.app/api/scan")
@@ -87,9 +87,9 @@ def format_signal(coin, ai_result, scan_score, change, price, scan_coin=None):
     t1        = ai_result.get("target_1", "")
     t2        = ai_result.get("target_2", "")
     timeframe = ai_result.get("timeframe", "4-8小時")
-    risk_note = ai_result.get("risk_note", "嚴控倉位，設好止損，單筆不超 3-5%")
-    summary   = ai_result.get("summary", "")
-    reason    = ai_result.get("reason", "")
+    risk_note = html.escape(ai_result.get("risk_note", "嚴控倉位，設好止損，單筆不超 3-5%"))
+    summary   = html.escape(ai_result.get("summary", ""))
+    reason    = html.escape(ai_result.get("reason", ""))
     sc        = scan_coin or {}
     rsi       = ai_result.get("rsi_1h") or ai_result.get("rsi") or sc.get("rsi") or ""
     vol_ratio = ai_result.get("vol_ratio") or sc.get("vol_ratio") or ""
