@@ -1,11 +1,12 @@
 """
-trigger.py - LANA Cron v8
+trigger.py - LANA Cron v9
 流程：
 1. /api/scan 取所有幣分數
 2. 分數 >= MIN_SCORE 的幣 → 呼叫 /api/ai_analyze 深度分析
-3. AI 說 LONG/SHORT 的訊號依 AI 評分排序，只推最強的前 TOP_N_PUSH 個（避免選擇困難）
-4. AI 說 WATCH → 靜默跳過
-5. 同一顆幣 4 小時冷卻（由 app.py 伺服器端記憶體處理，cron 端本身無狀態）
+3. AI 評分 < PUSH_MIN_AI_SCORE 的訊號直接排除（不因候選不足硬推弱訊號）
+4. AI 說 LONG/SHORT 且評分達標的訊號依評分排序，只推最強的前 TOP_N_PUSH 個
+5. AI 說 WATCH → 靜默跳過
+6. 同一顆幣 4 小時冷卻（由 app.py 伺服器端記憶體處理，cron 端本身無狀態）
 """
 
 import requests, os, sys, time, hashlib, html
@@ -15,8 +16,9 @@ SCAN_URL     = os.getenv("SCAN_URL", "https://web-production-7cdf9.up.railway.ap
 AI_URL       = os.getenv("AI_URL", "https://web-production-7cdf9.up.railway.app/api/ai_analyze")
 BOT_TOKEN    = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID      = os.getenv("TELEGRAM_CHAT_ID", "")
-MIN_SCORE    = int(os.getenv("MIN_SCORE", "72"))
-TOP_N_PUSH   = int(os.getenv("TOP_N_PUSH", "3"))
+MIN_SCORE        = int(os.getenv("MIN_SCORE", "72"))
+TOP_N_PUSH       = int(os.getenv("TOP_N_PUSH", "3"))
+PUSH_MIN_AI_SCORE = int(os.getenv("PUSH_MIN_AI_SCORE", "70"))
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
@@ -74,7 +76,7 @@ def ai_analyze(coin, price, change_24h):
             if data.get("direction"):
                 return data
         else:
-            print(f"  AI HTTP {r.status_code} {coin}")
+            print(f"  AI HTTP {r.status_code} {coin}: {r.text[:300]}")
     except Exception as e:
         print(f"  AI 分析失敗 {coin}: {e}")
     return None
@@ -171,6 +173,10 @@ try:
 
         if direction not in ("LONG", "SHORT"):
             print(f"  {coin} AI說{direction}，跳過")
+            continue
+
+        if ai_score < PUSH_MIN_AI_SCORE:
+            print(f"  {coin} AI評分{ai_score}低於推送門檻{PUSH_MIN_AI_SCORE}，跳過（不因候選不足而硬推弱訊號）")
             continue
 
         qualified.append({
