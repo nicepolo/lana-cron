@@ -169,7 +169,8 @@ try:
 
         direction = ai_result.get("direction", "WATCH")
         ai_score  = ai_result.get("score", 0)
-        print(f"  {coin} AI結果: {direction} {ai_score}分")
+        ai_model  = ai_result.get("model", "?")
+        print(f"  {coin} AI結果: {direction} {ai_score}分 [{ai_model}]")
 
         if direction not in ("LONG", "SHORT"):
             print(f"  {coin} AI說{direction}，跳過")
