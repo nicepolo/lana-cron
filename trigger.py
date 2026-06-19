@@ -36,14 +36,16 @@ PUSH_MIN_AI_SCORE = int(os.getenv("PUSH_MIN_AI_SCORE", "70"))
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
-def send_tg(text, chat_id=None):
+def send_tg(text, chat_id=None, reply_markup=None):
     if not BOT_TOKEN or not CHAT_ID:
         return False
     try:
+        payload = {"chat_id": chat_id or CHAT_ID, "text": text, "parse_mode": "HTML"}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         r = requests.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            json={"chat_id": chat_id or CHAT_ID, "text": text, "parse_mode": "HTML"},
-            timeout=10
+            json=payload, timeout=10
         )
         if not r.ok:
             print(f"TG 推送失敗 HTTP {r.status_code}: {r.text[:200]}")
@@ -283,7 +285,12 @@ try:
             print(f"  {coin} 10分鐘內已推送，跳過")
             continue
 
-        ok = send_tg(msg)
+        ok = send_tg(msg, reply_markup={
+            "inline_keyboard": [[
+                {"text": "📊 深度分析", "callback_data": f"analyze:{coin}"},
+                {"text": "⏸ 暫停4小時", "callback_data": "pause:4"}
+            ]]
+        })
         if ok:
             recent_fps.add(fp)
             pushed += 1
