@@ -303,7 +303,7 @@ try:
         skipped_coins = ", ".join(q["coin"] for q in qualified[TOP_N_PUSH:])
         print(f"  共{len(qualified)}個訊號達標，只推最強{len(to_send)}個，略過{skipped_n}個（{skipped_coins}）")
 
-    # 掃描彙報
+    # 掃描彙報（帶完整控制按鈕，不用打指令）
     top5 = sorted(coins, key=lambda x: x.get("lana_score") or 0, reverse=True)[:5]
     lines = ["🔍 LANA 掃描結果:", ""]
     for c in top5:
@@ -311,7 +311,21 @@ try:
         ch = c.get("change", 0)
         lines.append(f"💰 {c['coin']}: {sc} 分 | 漲幅 {ch:+.1f}%")
     lines.append(f"\n⏰ {ts}  |  AI分析: {len(candidates)} 顆候選  |  達標: {len(qualified)} 個  |  推送: {pushed} 個")
-    send_tg("\n".join(lines))
+    send_tg("\n".join(lines), reply_markup={
+        "inline_keyboard": [
+            [
+                {"text": "⏸ 暫停4小時", "callback_data": "pause:4"},
+                {"text": "⏸ 暫停8小時", "callback_data": "pause:8"},
+            ],
+            [
+                {"text": "⏸ 永久暫停", "callback_data": "pause:0"},
+                {"text": "▶️ 恢復推送", "callback_data": "resume"},
+            ],
+            [
+                {"text": "📊 查看狀態", "callback_data": "status"},
+            ]
+        ]
+    })
 
     print(f"完成，推送 {pushed} 個")
 
