@@ -13,7 +13,7 @@ trigger.py - LANA Cron v9
 trigger.py - LANA Cron v10
 流程：
 1. 處理 TG 指令（/pause /resume /status）
-2. 檢查推送開關（靜默時段 02:00-07:00 / 手動暫停）→ 若不應推送則直接結束
+2. 檢查手動暫停開關 → 若暫停中則跳過本輪（省 API 費用）
 3. /api/scan 取所有幣分數
 4. 分數 >= MIN_SCORE 的幣 → 呼叫 /api/ai_analyze 深度分析
 5. AI 評分 < PUSH_MIN_AI_SCORE 的訊號直接排除
@@ -211,12 +211,12 @@ try:
     # 先處理 TG 指令（/pause /resume /status）
     handle_tg_commands()
 
-    # 查詢推送開關（靜默時段 + 手動暫停）
+    # 查詢手動暫停開關
     ctrl = check_should_push()
     if not ctrl.get("should_push", True):
         msg = ctrl.get("message", "暫停中")
         print(f"  推送已暫停：{msg}，本輪跳過")
-        sys.exit(0)  # 正常結束，不做 AI 分析（省 API 費用）
+        sys.exit(0)
 
     r = requests.get(SCAN_URL, timeout=45)
     data = r.json()
