@@ -9,26 +9,40 @@ trigger.py - LANA Cron v9
 6. 同一顆幣 4 小時冷卻（由 app.py 伺服器端記憶體處理，cron 端本身無狀態）
 """
 
+"""
+trigger.py - LANA Cron v10
+流程：
+1. 處理 TG 指令（/pause /resume /status）
+2. 檢查推送開關（靜默時段 02:00-07:00 / 手動暫停）→ 若不應推送則直接結束
+3. /api/scan 取所有幣分數
+4. 分數 >= MIN_SCORE 的幣 → 呼叫 /api/ai_analyze 深度分析
+5. AI 評分 < PUSH_MIN_AI_SCORE 的訊號直接排除
+6. AI 說 LONG/SHORT 且評分達標的訊號依評分排序，只推最強的前 TOP_N_PUSH 個
+7. AI 說 WATCH → 靜默跳過
+8. 同一顆幣 4 小時冷卻（由 app.py 伺服器端記憶體處理）
+"""
+
 import requests, os, sys, time, hashlib, html
 from datetime import datetime, timezone, timedelta
 
 SCAN_URL     = os.getenv("SCAN_URL", "https://web-production-7cdf9.up.railway.app/api/scan")
 AI_URL       = os.getenv("AI_URL", "https://web-production-7cdf9.up.railway.app/api/ai_analyze")
+CTRL_URL     = os.getenv("CTRL_URL", "https://web-production-7cdf9.up.railway.app/api/push_control")
 BOT_TOKEN    = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID      = os.getenv("TELEGRAM_CHAT_ID", "")
-MIN_SCORE        = int(os.getenv("MIN_SCORE", "72"))
-TOP_N_PUSH       = int(os.getenv("TOP_N_PUSH", "3"))
+MIN_SCORE         = int(os.getenv("MIN_SCORE", "72"))
+TOP_N_PUSH        = int(os.getenv("TOP_N_PUSH", "3"))
 PUSH_MIN_AI_SCORE = int(os.getenv("PUSH_MIN_AI_SCORE", "70"))
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
-def send_tg(text):
+def send_tg(text, chat_id=None):
     if not BOT_TOKEN or not CHAT_ID:
         return False
     try:
         r = requests.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"},
+            json={"chat_id": chat_id or CHAT_ID, "text": text, "parse_mode": "HTML"},
             timeout=10
         )
         if not r.ok:
@@ -37,6 +51,64 @@ def send_tg(text):
     except Exception as e:
         print(f"TG 錯誤: {e}")
         return False
+
+def handle_tg_commands():
+    """處理 TG 指令：/pause [小時]、/resume、/status"""
+    try:
+        r = requests.get(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates",
+            params={"limit": 10, "offset": -10},
+            timeout=8
+        )
+        if not r.ok:
+            return
+        updates = r.json().get("result", [])
+        now_ts = time.time()
+        for u in updates:
+            msg = u.get("message", {}) or u.get("channel_post", {})
+            text = (msg.get("text") or "").strip()
+            msg_ts = msg.get("date", 0)
+            chat_id = str(msg.get("chat", {}).get("id", "") or CHAT_ID)
+            # 只處理最近 2 分鐘內的訊息（避免重複處理舊指令）
+            if now_ts - msg_ts > 120:
+                continue
+            if text.startswith("/pause"):
+                parts = text.split()
+                hours = 0
+                if len(parts) > 1:
+                    try: hours = float(parts[1])
+                    except: pass
+                payload = {"action": "pause", "hours": hours}
+                resp = requests.post(CTRL_URL, json=payload, timeout=8)
+                if resp.ok:
+                    msg_out = resp.json().get("message", "已暫停")
+                    send_tg(f"⏸ {msg_out}\n\n發送 /resume 可立即恢復推送", chat_id)
+            elif text == "/resume":
+                resp = requests.post(CTRL_URL, json={"action": "resume"}, timeout=8)
+                if resp.ok:
+                    send_tg("▶️ 已恢復推送訊號", chat_id)
+            elif text == "/status":
+                resp = requests.get(CTRL_URL, timeout=8)
+                if resp.ok:
+                    d = resp.json()
+                    status = "🟢 推送中" if d.get("should_push") else f"⏸ {d.get('message', '暫停中')}"
+                    send_tg(
+                        f"📊 LANA 推送狀態\n\n{status}\n\n"
+                        f"指令：\n/pause [小時] — 暫停（不填=永久）\n/resume — 恢復\n/status — 查狀態",
+                        chat_id
+                    )
+    except Exception as e:
+        print(f"處理TG指令失敗: {e}")
+
+def check_should_push():
+    """查詢伺服器端推送開關狀態"""
+    try:
+        r = requests.get(CTRL_URL, timeout=8)
+        if r.ok:
+            return r.json()
+    except Exception as e:
+        print(f"查詢推送狀態失敗: {e}，預設繼續推送")
+    return {"should_push": True}
 
 def tg_recent_fingerprints():
     try:
@@ -133,6 +205,16 @@ def format_signal(coin, ai_result, scan_score, change, price, scan_coin=None):
 try:
     now_str = datetime.now(TZ_TAIPEI).strftime("%H:%M")
     print(f"[{now_str}] 開始掃描...")
+
+    # 先處理 TG 指令（/pause /resume /status）
+    handle_tg_commands()
+
+    # 查詢推送開關（靜默時段 + 手動暫停）
+    ctrl = check_should_push()
+    if not ctrl.get("should_push", True):
+        msg = ctrl.get("message", "暫停中")
+        print(f"  推送已暫停：{msg}，本輪跳過")
+        sys.exit(0)  # 正常結束，不做 AI 分析（省 API 費用）
 
     r = requests.get(SCAN_URL, timeout=45)
     data = r.json()
