@@ -288,6 +288,8 @@ try:
         ok = send_tg(msg, reply_markup={
             "inline_keyboard": [[
                 {"text": "📊 深度分析", "callback_data": f"analyze:{coin}"},
+                {"text": "🔄 強制重分析", "callback_data": f"reanalyze:{coin}"},
+            ],[
                 {"text": "⏸ 暫停4小時", "callback_data": "pause:4"}
             ]]
         })
