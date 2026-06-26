@@ -156,23 +156,14 @@ def ai_analyze(coin, price, change_24h):
     return None
 
 def format_signal(coin, ai_result, scan_score, change, price, scan_coin=None):
-    direction = ai_result.get("direction", "WATCH")
     score     = ai_result.get("score", scan_score)
-    entry     = ai_result.get("entry_zone", "")
-    sl        = ai_result.get("stop_loss", "")
-    t1        = ai_result.get("target_1", "")
-    t2        = ai_result.get("target_2", "")
-    timeframe = ai_result.get("timeframe", "4-8小時")
-    risk_note = html.escape(ai_result.get("risk_note", "嚴控倉位，設好止損，單筆不超 3-5%"))
-    summary   = html.escape(ai_result.get("summary", ""))
-    reason    = html.escape(ai_result.get("reason", ""))
     sc        = scan_coin or {}
     rsi       = ai_result.get("rsi_1h") or ai_result.get("rsi") or sc.get("rsi") or ""
     vol_ratio = ai_result.get("vol_ratio") or sc.get("vol_ratio") or ""
     funding   = ai_result.get("funding_rate") or sc.get("funding") or ""
+    summary   = html.escape(ai_result.get("summary", ""))
+    reason    = html.escape(ai_result.get("reason", ""))
 
-    dir_emoji  = {"LONG": "🟢", "SHORT": "🔴"}.get(direction, "⚪")
-    dir_text   = {"LONG": "做多 ▲", "SHORT": "做空 ▼"}.get(direction, "觀望")
     conf_label = "高 🔥" if score >= 80 else "中 ✅" if score >= 65 else "低 ⚠️"
     now_str    = datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d %H:%M")
 
@@ -180,28 +171,21 @@ def format_signal(coin, ai_result, scan_score, change, price, scan_coin=None):
     vr_str  = f"{vol_ratio:.1f}x" if isinstance(vol_ratio, float) else str(vol_ratio) if vol_ratio else "N/A"
     fr_str  = f"{funding:+.3%}" if isinstance(funding, float) else "N/A"
 
+    # 推播只顯示技術面,不給方向——方向交給使用者按「🔄 重新分析」決定
     lines = [
-        f"{dir_emoji} <b>{coin}/USDT (OKX)</b>",
+        f"📡 <b>{coin}/USDT (OKX)</b>",
         f"現價: {price}  📈 24h {change:+.1f}%",
-        f"方向: {dir_text}  🔥 信心: {conf_label}  訊號強度: {score}/100",
+        f"訊號強度: {score}/100  信心: {conf_label}",
         f"RSI 1H: {rsi_str}  量能: {vr_str}  FR: {fr_str}",
     ]
     if summary:
         lines.append(f"\n📌 {summary}")
     if reason:
         lines.append(f"<i>{reason}</i>")
-    if direction in ("LONG", "SHORT") and entry:
-        lines += [
-            "",
-            f"🎯 入場區間: {entry}",
-            f"🔴 止損: {sl}",
-            f"✅ 目標1: {t1}",
-            f"🏆 目標2: {t2}",
-            f"⏱ 預期持倉: {timeframe}",
-            f"⚠️ {risk_note}",
-        ]
+
     lines.append(f"\n⏰ {now_str}")
     return "\n".join(lines)
+
 
 # ── 主流程 ──────────────────────────────────────────────────
 try:
@@ -287,9 +271,7 @@ try:
 
         ok = send_tg(msg, reply_markup={
             "inline_keyboard": [[
-                {"text": "📊 深度分析", "callback_data": f"analyze:{coin}"},
-                {"text": "🔄 強制重分析", "callback_data": f"reanalyze:{coin}"},
-            ],[
+                {"text": "🔄 重新分析", "callback_data": f"reanalyze:{coin}"},
                 {"text": "⏸ 暫停4小時", "callback_data": "pause:4"}
             ]]
         })
