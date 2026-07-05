@@ -28,6 +28,7 @@ from datetime import datetime, timezone, timedelta
 SCAN_URL     = os.getenv("SCAN_URL", "https://web-production-7cdf9.up.railway.app/api/scan")
 AI_URL       = os.getenv("AI_URL", "https://web-production-7cdf9.up.railway.app/api/ai_analyze")
 CTRL_URL     = os.getenv("CTRL_URL", "https://web-production-7cdf9.up.railway.app/api/push_control")
+PAPER_MARK_URL = os.getenv("PAPER_MARK_URL", "https://web-production-7cdf9.up.railway.app/api/paper/mark")
 BOT_TOKEN    = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID      = os.getenv("TELEGRAM_CHAT_ID", "")
 MIN_SCORE         = int(os.getenv("MIN_SCORE", "72"))
@@ -112,6 +113,18 @@ def check_should_push():
         print(f"查詢推送狀態失敗: {e}，預設繼續推送")
     return {"should_push": True}
 
+def mark_paper_positions():
+    """更新模擬持倉；推播即使暫停，既有模擬倉仍需持續風控。"""
+    try:
+        r = requests.post(PAPER_MARK_URL, timeout=30)
+        if r.ok:
+            summary = r.json().get("summary", {})
+            print(f"  Paper Trading: 持倉 {summary.get('open_trades', 0)}，已實現 {summary.get('realized_pnl', 0)}")
+        else:
+            print(f"  Paper Trading 更新失敗 HTTP {r.status_code}")
+    except Exception as e:
+        print(f"  Paper Trading 更新失敗: {e}")
+
 def tg_recent_fingerprints():
     try:
         r = requests.get(
@@ -171,13 +184,21 @@ def format_signal(coin, ai_result, scan_score, change, price, scan_coin=None):
     vr_str  = f"{vol_ratio:.1f}x" if isinstance(vol_ratio, float) else str(vol_ratio) if vol_ratio else "N/A"
     fr_str  = f"{funding:+.3%}" if isinstance(funding, float) else "N/A"
 
-    # 推播只顯示技術面,不給方向——方向交給使用者按「🔄 重新分析」決定
+    direction = ai_result.get("direction", "WATCH")
+    direction_text = "🟢 模擬做多" if direction == "LONG" else "🔴 模擬做空" if direction == "SHORT" else "⚪ 觀望"
     lines = [
         f"📡 <b>{coin}/USDT (OKX)</b>",
         f"現價: {price}  📈 24h {change:+.1f}%",
+        f"方向: <b>{direction_text}</b>（Paper Trading）",
         f"訊號強度: {score}/100  信心: {conf_label}",
+        f"規則分數: LONG {ai_result.get('long_score', 'N/A')} / SHORT {ai_result.get('short_score', 'N/A')}",
         f"RSI 1H: {rsi_str}  量能: {vr_str}  FR: {fr_str}",
     ]
+    if direction in ("LONG", "SHORT"):
+        lines.append(
+            f"模擬價位: 進場 {ai_result.get('entry_zone')} / 止損 {ai_result.get('stop_loss')} / "
+            f"TP1 {ai_result.get('target_1')} / TP2 {ai_result.get('target_2')}"
+        )
     if summary:
         lines.append(f"\n📌 {summary}")
     if reason:
@@ -194,6 +215,9 @@ try:
 
     # 先處理 TG 指令（/pause /resume /status）
     handle_tg_commands()
+
+    # 模擬倉位與推播開關分離，避免暫停推播時漏掉止損/止盈。
+    mark_paper_positions()
 
     # 查詢手動暫停開關
     ctrl = check_should_push()
