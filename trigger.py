@@ -29,6 +29,7 @@ SCAN_URL     = os.getenv("SCAN_URL", "https://web-production-7cdf9.up.railway.ap
 AI_URL       = os.getenv("AI_URL", "https://web-production-7cdf9.up.railway.app/api/ai_analyze")
 CTRL_URL     = os.getenv("CTRL_URL", "https://web-production-7cdf9.up.railway.app/api/push_control")
 PAPER_MARK_URL = os.getenv("PAPER_MARK_URL", "https://web-production-7cdf9.up.railway.app/api/paper/mark")
+POSITION_MONITOR_URL = os.getenv("POSITION_MONITOR_URL", "https://web-production-7cdf9.up.railway.app/api/positions/monitor")
 BOT_TOKEN    = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID      = os.getenv("TELEGRAM_CHAT_ID", "")
 MIN_SCORE         = int(os.getenv("MIN_SCORE", "72"))
@@ -125,6 +126,43 @@ def mark_paper_positions():
     except Exception as e:
         print(f"  Paper Trading 更新失敗: {e}")
 
+
+def monitor_manual_positions():
+    """持續追蹤使用者按下「已下單」的部位，即使新訊號推送暫停。"""
+    try:
+        response = requests.post(POSITION_MONITOR_URL, timeout=90)
+        if not response.ok:
+            print(f"  持倉助手更新失敗 HTTP {response.status_code}")
+            return
+        data = response.json()
+        alerts = data.get("alerts", [])
+        print(f"  持倉助手: 追蹤 {data.get('monitored', 0)} 筆，通知 {len(alerts)} 筆")
+        action_labels = {
+            "ADD": "➕ 考慮加倉",
+            "REDUCE_50": "✂️ 減倉 50%",
+            "REDUCE_30": "✂️ 再減倉 30%",
+            "REDUCE_OR_CLOSE": "⚠️ 減倉或平倉",
+            "CLOSE": "🛑 立即平倉",
+            "HOLD": "🟢 續抱",
+        }
+        for alert in alerts:
+            action = alert.get("action", "HOLD")
+            message = (
+                f"🧭 <b>{alert.get('coin')}/USDT 持倉更新</b>\n\n"
+                f"{action_labels.get(action, action)}\n"
+                f"{html.escape(str(alert.get('message', '')))}\n\n"
+                f"目前：{alert.get('price')}（{alert.get('pnl_pct', 0):+.2f}% / "
+                f"{alert.get('r_multiple', 0):+.2f}R）\n"
+                f"動態止損：{alert.get('stop_loss')}\n"
+                f"目標1：{alert.get('target_1')}｜目標2：{alert.get('target_2')}"
+            )
+            send_tg(message, reply_markup={"inline_keyboard": [[
+                {"text": "📊 查看持倉", "callback_data": "positions_status"},
+                {"text": "🏁 已平倉", "callback_data": f"position_close:{alert.get('position_id')}"},
+            ]]})
+    except Exception as e:
+        print(f"  持倉助手更新失敗: {e}")
+
 def tg_recent_fingerprints():
     try:
         r = requests.get(
@@ -218,6 +256,7 @@ try:
 
     # 模擬倉位與推播開關分離，避免暫停推播時漏掉止損/止盈。
     mark_paper_positions()
+    monitor_manual_positions()
 
     # 查詢手動暫停開關
     ctrl = check_should_push()
@@ -293,12 +332,17 @@ try:
             print(f"  {coin} 10分鐘內已推送，跳過")
             continue
 
-        ok = send_tg(msg, reply_markup={
-            "inline_keyboard": [[
+        keyboard = []
+        signal_id = q["ai_result"].get("signal_id")
+        if signal_id:
+            keyboard.append([
+                {"text": "✅ 已下單，開始追蹤", "callback_data": f"entered:{signal_id}"}
+            ])
+        keyboard.append([
                 {"text": "🔄 重新分析", "callback_data": f"reanalyze:{coin}"},
                 {"text": "⏸ 暫停4小時", "callback_data": "pause:4"}
-            ]]
-        })
+            ])
+        ok = send_tg(msg, reply_markup={"inline_keyboard": keyboard})
         if ok:
             recent_fps.add(fp)
             pushed += 1
