@@ -153,6 +153,7 @@ def monitor_manual_positions():
                 f"{html.escape(str(alert.get('message', '')))}\n\n"
                 f"目前：{alert.get('price')}（{alert.get('pnl_pct', 0):+.2f}% / "
                 f"{alert.get('r_multiple', 0):+.2f}R）\n"
+                f"價格來源：{alert.get('price_source') or alert.get('exchange') or '未知'}\n"
                 f"動態止損：{alert.get('stop_loss')}\n"
                 f"目標1：{alert.get('target_1')}｜目標2：{alert.get('target_2')}"
             )
