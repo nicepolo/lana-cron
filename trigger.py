@@ -35,6 +35,7 @@ CHAT_ID      = os.getenv("TELEGRAM_CHAT_ID", "")
 MIN_SCORE         = int(os.getenv("MIN_SCORE", "72"))
 TOP_N_PUSH        = int(os.getenv("TOP_N_PUSH", "3"))
 PUSH_MIN_AI_SCORE = int(os.getenv("PUSH_MIN_AI_SCORE", "70"))
+MAX_AI_CANDIDATES  = int(os.getenv("MAX_AI_CANDIDATES", "3"))
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
@@ -278,6 +279,8 @@ try:
 
     # 分數 >= MIN_SCORE 的候選
     candidates = [c for c in coins if (c.get("lana_score") or 0) >= MIN_SCORE]
+    candidates.sort(key=lambda c: c.get("lana_score") or 0, reverse=True)
+    candidates = candidates[:max(1, MAX_AI_CANDIDATES)]
     print(f"  候選 (>={MIN_SCORE}分): {len(candidates)} 顆")
 
     # TG 指紋去重
