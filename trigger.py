@@ -34,18 +34,19 @@ BOT_TOKEN    = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID      = os.getenv("TELEGRAM_CHAT_ID", "")
 MIN_SCORE         = int(os.getenv("MIN_SCORE", "60"))
 TOP_N_PUSH        = int(os.getenv("TOP_N_PUSH", "3"))
-# Guardrails: Railway may still have old, too-strict variables.
-# Keep user-tuned looser values, but cap old strict settings so the bot does not go silent all day.
+# Guardrails: Railway may still have old variables.
+# Keep thresholds loose enough to avoid silence, but limit Gemini calls so the key does not get rate-limited.
 PUSH_MIN_AI_SCORE = min(int(os.getenv("PUSH_MIN_AI_SCORE", "60")), 60)
 SECONDARY_PUSH_MIN_AI_SCORE = min(int(os.getenv("SECONDARY_PUSH_MIN_AI_SCORE", "55")), 55)
-MAX_AI_CANDIDATES  = max(int(os.getenv("MAX_AI_CANDIDATES", "8")), 8)
+MAX_AI_CANDIDATES  = min(int(os.getenv("MAX_AI_CANDIDATES", "4")), 4)
 MIN_DIRECTION_SCORE = min(int(os.getenv("MIN_DIRECTION_SCORE", "65")), 65)
 MAX_AI_ABS_CHANGE_24H = max(float(os.getenv("MAX_AI_ABS_CHANGE_24H", "45")), 45)
-AI_REQUEST_DELAY_SEC = float(os.getenv("AI_REQUEST_DELAY_SEC", "2"))
+AI_REQUEST_DELAY_SEC = max(float(os.getenv("AI_REQUEST_DELAY_SEC", "3")), 3)
 # When Gemini is rate-limited and Claude fallback is disabled, the web app returns a
 # deterministic rules result. Push it as an observation signal instead of going silent.
 ALLOW_RULES_SIGNAL_PUSH = os.getenv("ALLOW_RULES_SIGNAL_PUSH", "true").strip().lower() in ("1", "true", "yes", "on")
 FORCE_REANALYZE_BEFORE_PUSH = os.getenv("FORCE_REANALYZE_BEFORE_PUSH", "true").strip().lower() in ("1", "true", "yes", "on")
+FORCE_REANALYZE_TOP_N = max(0, min(int(os.getenv("FORCE_REANALYZE_TOP_N", "1")), 1))
 PUSH_BEST_SECONDARY_WHEN_EMPTY = os.getenv("PUSH_BEST_SECONDARY_WHEN_EMPTY", "true").strip().lower() in ("1", "true", "yes", "on")
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
@@ -323,7 +324,7 @@ try:
 
     qualified = []  # 通過AI分析且判定LONG/SHORT的訊號，先收集起來排序
     secondary_pool = []  # 整輪沒有強訊號時，只推一筆最佳次級觀察訊號
-    for c in candidates:
+    for idx, c in enumerate(candidates):
         coin   = c["coin"]
         score  = c.get("lana_score", 0)
         change = c.get("change", 0)
@@ -332,7 +333,8 @@ try:
         # 冷卻由 app.py 伺服器端記憶體處理（cron 端每次都是全新容器，本地無法持久記憶冷卻）
 
         print(f"  AI 分析 {coin} (scan:{score}分)...")
-        ai_result = ai_analyze(coin, price, change, force=FORCE_REANALYZE_BEFORE_PUSH)
+        force_ai = FORCE_REANALYZE_BEFORE_PUSH and idx < FORCE_REANALYZE_TOP_N
+        ai_result = ai_analyze(coin, price, change, force=force_ai)
         time.sleep(AI_REQUEST_DELAY_SEC)
 
         if not ai_result:
