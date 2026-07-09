@@ -42,7 +42,9 @@ MAX_AI_CANDIDATES  = max(int(os.getenv("MAX_AI_CANDIDATES", "8")), 8)
 MIN_DIRECTION_SCORE = min(int(os.getenv("MIN_DIRECTION_SCORE", "65")), 65)
 MAX_AI_ABS_CHANGE_24H = max(float(os.getenv("MAX_AI_ABS_CHANGE_24H", "45")), 45)
 AI_REQUEST_DELAY_SEC = float(os.getenv("AI_REQUEST_DELAY_SEC", "2"))
-ALLOW_RULES_SIGNAL_PUSH = os.getenv("ALLOW_RULES_SIGNAL_PUSH", "false").strip().lower() in ("1", "true", "yes", "on")
+# When Gemini is rate-limited and Claude fallback is disabled, the web app returns a
+# deterministic rules result. Push it as an observation signal instead of going silent.
+ALLOW_RULES_SIGNAL_PUSH = os.getenv("ALLOW_RULES_SIGNAL_PUSH", "true").strip().lower() in ("1", "true", "yes", "on")
 FORCE_REANALYZE_BEFORE_PUSH = os.getenv("FORCE_REANALYZE_BEFORE_PUSH", "true").strip().lower() in ("1", "true", "yes", "on")
 PUSH_BEST_SECONDARY_WHEN_EMPTY = os.getenv("PUSH_BEST_SECONDARY_WHEN_EMPTY", "true").strip().lower() in ("1", "true", "yes", "on")
 
@@ -386,7 +388,9 @@ try:
     for q in to_send:
         coin = q["coin"]
         msg = format_signal(coin, q["ai_result"], q["score"], q["change"], q["price"], scan_coin=q["scan_coin"])
-        if q.get("secondary"):
+        if str(q["ai_result"].get("model", "")).lower() == "rules":
+            msg = "⚠️ <b>規則模式觀察訊號</b>\nGemini 目前限流或忙碌，這不是 Gemini 深度分析；若要做，請輕倉並嚴守止損。\n\n" + msg
+        elif q.get("secondary"):
             msg = "⚠️ <b>輕倉觀察訊號</b>\n本輪沒有強訊號，這是最佳次級訊號；若要做，請縮小倉位並嚴守止損。\n\n" + msg
 
         # 指紋去重
