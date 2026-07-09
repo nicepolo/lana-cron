@@ -254,7 +254,7 @@ def format_signal(coin, ai_result, scan_score, change, price, scan_coin=None):
         f"RSI 1H: {rsi_str}  量能: {vr_str}  FR: {fr_str}",
     ]
     if is_rules:
-        lines.append("⚠️ Gemini 未啟用，這是規則模式，只能觀察/模擬，不建議下單。")
+        lines.append("⚠️ Gemini 目前限流或忙碌，這是規則模式，只能觀察/模擬，不建議下單。")
     if direction in ("LONG", "SHORT"):
         lines.append(
             f"模擬價位: 進場 {ai_result.get('entry_zone')} / 止損 {ai_result.get('stop_loss')} / "
