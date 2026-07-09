@@ -32,10 +32,13 @@ PAPER_MARK_URL = os.getenv("PAPER_MARK_URL", "https://web-production-7cdf9.up.ra
 POSITION_MONITOR_URL = os.getenv("POSITION_MONITOR_URL", "https://web-production-7cdf9.up.railway.app/api/positions/monitor")
 BOT_TOKEN    = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID      = os.getenv("TELEGRAM_CHAT_ID", "")
-MIN_SCORE         = int(os.getenv("MIN_SCORE", "72"))
+MIN_SCORE         = int(os.getenv("MIN_SCORE", "60"))
 TOP_N_PUSH        = int(os.getenv("TOP_N_PUSH", "3"))
-PUSH_MIN_AI_SCORE = int(os.getenv("PUSH_MIN_AI_SCORE", "70"))
-MAX_AI_CANDIDATES  = int(os.getenv("MAX_AI_CANDIDATES", "3"))
+PUSH_MIN_AI_SCORE = int(os.getenv("PUSH_MIN_AI_SCORE", "65"))
+MAX_AI_CANDIDATES  = int(os.getenv("MAX_AI_CANDIDATES", "6"))
+MIN_DIRECTION_SCORE = int(os.getenv("MIN_DIRECTION_SCORE", "70"))
+MAX_AI_ABS_CHANGE_24H = float(os.getenv("MAX_AI_ABS_CHANGE_24H", "35"))
+AI_REQUEST_DELAY_SEC = float(os.getenv("AI_REQUEST_DELAY_SEC", "2"))
 ALLOW_RULES_SIGNAL_PUSH = os.getenv("ALLOW_RULES_SIGNAL_PUSH", "false").strip().lower() in ("1", "true", "yes", "on")
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
@@ -283,11 +286,25 @@ try:
     ts    = data.get("ts", "")
     print(f"  取得 {len(coins)} 顆幣")
 
-    # 分數 >= MIN_SCORE 的候選
-    candidates = [c for c in coins if (c.get("lana_score") or 0) >= MIN_SCORE]
-    candidates.sort(key=lambda c: c.get("lana_score") or 0, reverse=True)
+    # 候選策略：不要只看 LANA 總分，否則很多可交易的方向分會被漏掉。
+    # 但仍排除極端暴漲/暴跌，避免 LAB/KAITO 類型反覆誘導追單。
+    def candidate_score(c):
+        long_score = c.get("long_score") or 0
+        short_score = c.get("short_score") or 0
+        return max(c.get("lana_score") or 0, long_score, short_score)
+
+    def is_ai_candidate(c):
+        change = abs(float(c.get("change") or 0))
+        if change > MAX_AI_ABS_CHANGE_24H:
+            return False
+        if c.get("rule_direction") not in ("LONG", "SHORT"):
+            return False
+        return (c.get("lana_score") or 0) >= MIN_SCORE or candidate_score(c) >= MIN_DIRECTION_SCORE
+
+    candidates = [c for c in coins if is_ai_candidate(c)]
+    candidates.sort(key=candidate_score, reverse=True)
     candidates = candidates[:max(1, MAX_AI_CANDIDATES)]
-    print(f"  候選 (>={MIN_SCORE}分): {len(candidates)} 顆")
+    print(f"  候選 (LANA>={MIN_SCORE} 或方向分>={MIN_DIRECTION_SCORE}): {len(candidates)} 顆")
 
     # TG 指紋去重
     recent_fps = tg_recent_fingerprints()
@@ -303,6 +320,7 @@ try:
 
         print(f"  AI 分析 {coin} (scan:{score}分)...")
         ai_result = ai_analyze(coin, price, change)
+        time.sleep(AI_REQUEST_DELAY_SEC)
 
         if not ai_result:
             print(f"  {coin} AI 分析失敗，跳過")
