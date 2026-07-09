@@ -36,6 +36,7 @@ MIN_SCORE         = int(os.getenv("MIN_SCORE", "72"))
 TOP_N_PUSH        = int(os.getenv("TOP_N_PUSH", "3"))
 PUSH_MIN_AI_SCORE = int(os.getenv("PUSH_MIN_AI_SCORE", "70"))
 MAX_AI_CANDIDATES  = int(os.getenv("MAX_AI_CANDIDATES", "3"))
+ALLOW_RULES_SIGNAL_PUSH = os.getenv("ALLOW_RULES_SIGNAL_PUSH", "false").strip().lower() in ("1", "true", "yes", "on")
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
@@ -210,6 +211,8 @@ def ai_analyze(coin, price, change_24h):
 
 def format_signal(coin, ai_result, scan_score, change, price, scan_coin=None):
     score     = ai_result.get("score", scan_score)
+    model     = str(ai_result.get("model") or "").lower()
+    is_rules  = model == "rules"
     sc        = scan_coin or {}
     rsi       = ai_result.get("rsi_1h") or ai_result.get("rsi") or sc.get("rsi") or ""
     vol_ratio = ai_result.get("vol_ratio") or sc.get("vol_ratio") or ""
@@ -226,14 +229,17 @@ def format_signal(coin, ai_result, scan_score, change, price, scan_coin=None):
 
     direction = ai_result.get("direction", "WATCH")
     direction_text = "🟢 模擬做多" if direction == "LONG" else "🔴 模擬做空" if direction == "SHORT" else "⚪ 觀望"
+    score_label = "觀察分數" if is_rules else "AI分數"
     lines = [
         f"📡 <b>{coin}/USDT (OKX)</b>",
         f"現價: {price}  📈 24h {change:+.1f}%",
         f"方向: <b>{direction_text}</b>（Paper Trading）",
-        f"訊號強度: {score}/100  信心: {conf_label}",
+        f"{score_label}: {score}/100  信心: {conf_label}",
         f"規則分數: LONG {ai_result.get('long_score', 'N/A')} / SHORT {ai_result.get('short_score', 'N/A')}",
         f"RSI 1H: {rsi_str}  量能: {vr_str}  FR: {fr_str}",
     ]
+    if is_rules:
+        lines.append("⚠️ Gemini 未啟用，這是規則模式，只能觀察/模擬，不建議下單。")
     if direction in ("LONG", "SHORT"):
         lines.append(
             f"模擬價位: 進場 {ai_result.get('entry_zone')} / 止損 {ai_result.get('stop_loss')} / "
@@ -307,6 +313,10 @@ try:
         ai_model  = ai_result.get("model", "?")
         print(f"  {coin} AI結果: {direction} {ai_score}分 [{ai_model}]")
 
+        if str(ai_model).lower() == "rules" and not ALLOW_RULES_SIGNAL_PUSH:
+            print(f"  {coin} 使用規則備援模式，為避免誤導下單，跳過推送")
+            continue
+
         if direction not in ("LONG", "SHORT"):
             print(f"  {coin} AI說{direction}，跳過")
             continue
@@ -338,7 +348,7 @@ try:
 
         keyboard = []
         signal_id = q["ai_result"].get("signal_id")
-        if signal_id:
+        if signal_id and str(q["ai_result"].get("model", "")).lower() != "rules":
             keyboard.append([
                 {"text": "✅ 已下單，開始追蹤", "callback_data": f"entered:{signal_id}"}
             ])
