@@ -34,12 +34,15 @@ BOT_TOKEN    = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID      = os.getenv("TELEGRAM_CHAT_ID", "")
 MIN_SCORE         = int(os.getenv("MIN_SCORE", "60"))
 TOP_N_PUSH        = int(os.getenv("TOP_N_PUSH", "3"))
-PUSH_MIN_AI_SCORE = int(os.getenv("PUSH_MIN_AI_SCORE", "65"))
-MAX_AI_CANDIDATES  = int(os.getenv("MAX_AI_CANDIDATES", "6"))
-MIN_DIRECTION_SCORE = int(os.getenv("MIN_DIRECTION_SCORE", "70"))
-MAX_AI_ABS_CHANGE_24H = float(os.getenv("MAX_AI_ABS_CHANGE_24H", "35"))
+PUSH_MIN_AI_SCORE = int(os.getenv("PUSH_MIN_AI_SCORE", "60"))
+SECONDARY_PUSH_MIN_AI_SCORE = int(os.getenv("SECONDARY_PUSH_MIN_AI_SCORE", "55"))
+MAX_AI_CANDIDATES  = int(os.getenv("MAX_AI_CANDIDATES", "8"))
+MIN_DIRECTION_SCORE = int(os.getenv("MIN_DIRECTION_SCORE", "65"))
+MAX_AI_ABS_CHANGE_24H = float(os.getenv("MAX_AI_ABS_CHANGE_24H", "45"))
 AI_REQUEST_DELAY_SEC = float(os.getenv("AI_REQUEST_DELAY_SEC", "2"))
 ALLOW_RULES_SIGNAL_PUSH = os.getenv("ALLOW_RULES_SIGNAL_PUSH", "false").strip().lower() in ("1", "true", "yes", "on")
+FORCE_REANALYZE_BEFORE_PUSH = os.getenv("FORCE_REANALYZE_BEFORE_PUSH", "true").strip().lower() in ("1", "true", "yes", "on")
+PUSH_BEST_SECONDARY_WHEN_EMPTY = os.getenv("PUSH_BEST_SECONDARY_WHEN_EMPTY", "true").strip().lower() in ("1", "true", "yes", "on")
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
@@ -190,12 +193,17 @@ def tg_recent_fingerprints():
     except:
         return set()
 
-def ai_analyze(coin, price, change_24h):
+def ai_analyze(coin, price, change_24h, force=False):
     """呼叫 AI 深度分析，回傳 direction/score/summary 等"""
     try:
         r = requests.post(
             AI_URL,
-            json={"symbol": coin, "price": price, "change_24h": change_24h},
+            json={
+                "symbol": coin,
+                "price": price,
+                "change_24h": change_24h,
+                "force": force,
+            },
             timeout=45
         )
         if r.ok:
@@ -310,6 +318,7 @@ try:
     recent_fps = tg_recent_fingerprints()
 
     qualified = []  # 通過AI分析且判定LONG/SHORT的訊號，先收集起來排序
+    secondary_pool = []  # 整輪沒有強訊號時，只推一筆最佳次級觀察訊號
     for c in candidates:
         coin   = c["coin"]
         score  = c.get("lana_score", 0)
@@ -319,7 +328,7 @@ try:
         # 冷卻由 app.py 伺服器端記憶體處理（cron 端每次都是全新容器，本地無法持久記憶冷卻）
 
         print(f"  AI 分析 {coin} (scan:{score}分)...")
-        ai_result = ai_analyze(coin, price, change)
+        ai_result = ai_analyze(coin, price, change, force=FORCE_REANALYZE_BEFORE_PUSH)
         time.sleep(AI_REQUEST_DELAY_SEC)
 
         if not ai_result:
@@ -340,23 +349,43 @@ try:
             continue
 
         if ai_score < PUSH_MIN_AI_SCORE:
+            if PUSH_BEST_SECONDARY_WHEN_EMPTY and ai_score >= SECONDARY_PUSH_MIN_AI_SCORE:
+                print(f"  {coin} AI評分{ai_score}低於強訊號門檻{PUSH_MIN_AI_SCORE}，加入次級候選")
+                secondary_pool.append({
+                    "coin": coin, "ai_result": ai_result, "ai_score": ai_score,
+                    "score": score, "change": change, "price": price, "scan_coin": c,
+                    "secondary": True
+                })
+                continue
             print(f"  {coin} AI評分{ai_score}低於推送門檻{PUSH_MIN_AI_SCORE}，跳過（不因候選不足而硬推弱訊號）")
             continue
 
         qualified.append({
             "coin": coin, "ai_result": ai_result, "ai_score": ai_score,
-            "score": score, "change": change, "price": price, "scan_coin": c
+            "score": score, "change": change, "price": price, "scan_coin": c,
+            "secondary": False
         })
 
     # 依AI評分排序，只推最強的前 TOP_N_PUSH 個，避免一次丟太多訊號造成選擇困難
     qualified.sort(key=lambda x: x["ai_score"], reverse=True)
-    to_send = qualified[:TOP_N_PUSH]
-    skipped_n = len(qualified) - len(to_send)
+    if qualified:
+        to_send = qualified[:TOP_N_PUSH]
+        skipped_n = len(qualified) - len(to_send)
+    elif PUSH_BEST_SECONDARY_WHEN_EMPTY and secondary_pool:
+        secondary_pool.sort(key=lambda x: x["ai_score"], reverse=True)
+        to_send = secondary_pool[:1]
+        skipped_n = 0
+        print(f"  本輪無強訊號，改推最佳次級觀察訊號：{to_send[0]['coin']} {to_send[0]['ai_score']}分")
+    else:
+        to_send = []
+        skipped_n = 0
 
     pushed = 0
     for q in to_send:
         coin = q["coin"]
         msg = format_signal(coin, q["ai_result"], q["score"], q["change"], q["price"], scan_coin=q["scan_coin"])
+        if q.get("secondary"):
+            msg = "⚠️ <b>輕倉觀察訊號</b>\n本輪沒有強訊號，這是最佳次級訊號；若要做，請縮小倉位並嚴守止損。\n\n" + msg
 
         # 指紋去重
         fp = hashlib.md5(msg[:80].encode()).hexdigest()[:8]
