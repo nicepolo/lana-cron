@@ -225,7 +225,7 @@ def ai_analyze(coin, price, change_24h, force=False):
         print(f"  AI 分析失敗 {coin}: {e}")
     return None
 
-def format_signal(coin, ai_result, scan_score, change, price, scan_coin=None):
+def format_signal(coin, ai_result, scan_score, change, price, scan_coin=None, reanalyzed_at=None):
     score     = ai_result.get("score", scan_score)
     model     = str(ai_result.get("model") or "").lower()
     is_rules  = model == "rules"
@@ -267,6 +267,8 @@ def format_signal(coin, ai_result, scan_score, change, price, scan_coin=None):
         lines.append(f"<i>{reason}</i>")
 
     lines.append(f"\n⏰ {now_str}")
+    if reanalyzed_at:
+        lines.append(f"\n🔁 已自動重析：{reanalyzed_at}")
     return "\n".join(lines)
 
 
@@ -335,6 +337,7 @@ try:
         print(f"  AI 分析 {coin} (scan:{score}分)...")
         force_ai = FORCE_REANALYZE_BEFORE_PUSH and idx < FORCE_REANALYZE_TOP_N
         ai_result = ai_analyze(coin, price, change, force=force_ai)
+        reanalyzed_at = datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d %H:%M") if force_ai else None
         time.sleep(AI_REQUEST_DELAY_SEC)
 
         if not ai_result:
@@ -360,7 +363,7 @@ try:
                 secondary_pool.append({
                     "coin": coin, "ai_result": ai_result, "ai_score": ai_score,
                     "score": score, "change": change, "price": price, "scan_coin": c,
-                    "secondary": True
+                    "secondary": True, "reanalyzed_at": reanalyzed_at
                 })
                 continue
             print(f"  {coin} AI評分{ai_score}低於推送門檻{PUSH_MIN_AI_SCORE}，跳過（不因候選不足而硬推弱訊號）")
@@ -369,7 +372,7 @@ try:
         qualified.append({
             "coin": coin, "ai_result": ai_result, "ai_score": ai_score,
             "score": score, "change": change, "price": price, "scan_coin": c,
-            "secondary": False
+            "secondary": False, "reanalyzed_at": reanalyzed_at
         })
 
     # 依AI評分排序，只推最強的前 TOP_N_PUSH 個，避免一次丟太多訊號造成選擇困難
@@ -389,7 +392,7 @@ try:
     pushed = 0
     for q in to_send:
         coin = q["coin"]
-        msg = format_signal(coin, q["ai_result"], q["score"], q["change"], q["price"], scan_coin=q["scan_coin"])
+        msg = format_signal(coin, q["ai_result"], q["score"], q["change"], q["price"], scan_coin=q["scan_coin"], reanalyzed_at=q.get("reanalyzed_at"))
         if str(q["ai_result"].get("model", "")).lower() == "rules":
             msg = "⚠️ <b>規則模式觀察訊號</b>\nGemini 目前限流或忙碌，這不是 Gemini 深度分析；若要做，請輕倉並嚴守止損。\n\n" + msg
         elif q.get("secondary"):
