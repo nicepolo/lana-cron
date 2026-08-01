@@ -386,7 +386,16 @@ try:
             continue
 
         # 動能突破幣用較寬鬆的 AI 門檻
-        effective_min = MOMENTUM_AI_SCORE_MIN if burst else PUSH_MIN_AI_SCORE
+        # v5: 高分（>85）且非動能突破 → AI 門檻提高到 75，防止高分陷阱
+        momentum_dominated = ai_result.get("momentum_dominated", False)
+        if not burst and score > 85 and momentum_dominated:
+            effective_min = 75
+            print(f"  {coin} 高分({score})且漲幅主導，AI門檻提高至75")
+        elif not burst and score > 85:
+            effective_min = max(PUSH_MIN_AI_SCORE, 75)
+            print(f"  {coin} 高分({score})，AI門檻提高至75")
+        else:
+            effective_min = MOMENTUM_AI_SCORE_MIN if burst else PUSH_MIN_AI_SCORE
 
         if ai_score < effective_min:
             if PUSH_BEST_SECONDARY_WHEN_EMPTY and ai_score >= SECONDARY_PUSH_MIN_AI_SCORE:
